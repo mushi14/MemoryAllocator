@@ -69,6 +69,8 @@ unsigned long g_allocations = 0;
 
 pthread_mutex_t g_alloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+bool scribble = false;
+
 /**
  * print_memory
  *
@@ -109,6 +111,12 @@ void print_memory(void) {
     fclose(fp);
 }
 
+/**
+  * Writes out the current memory state, including both the regions and blocks.
+  * Entries are printed in order, so there is an implied link from the topmost
+  * entry to the next, and so on. Writes to file given
+  * Param: fp, file pointer to write the info to
+  */
 void write_memory(FILE *fp) {
     if (fp == NULL) {
         return;
@@ -139,12 +147,17 @@ void write_memory(FILE *fp) {
     fclose(fp);
 }
 
+/**
+  * Finds the first possible place for allocation and allocates the memory there, if all the 
+  * memory regions are filled, calls malloc(size)
+  * Param: size, size of the memory to be allocated
+  * Return: void pointer to the start of the memory allocation
+  */
 void *first_fit(size_t size) {
 	struct mem_block *block = g_head;
 	size_t real_size = size + sizeof(struct mem_block);
 
     if (block == NULL) {
-        pthread_mutex_unlock(&g_alloc_mutex);
         return NULL;
     }
 
@@ -153,7 +166,6 @@ void *first_fit(size_t size) {
             if (block->usage == 0) {
                 block->alloc_id = g_allocations++;
                 block->usage = real_size;
-                pthread_mutex_unlock(&g_alloc_mutex);
                 return block + 1;
             } else {
                 struct mem_block *new_block = (void*) block + block->usage;
@@ -167,7 +179,6 @@ void *first_fit(size_t size) {
 
                 block->next = new_block;
                 block->size = block->usage;
-                pthread_mutex_unlock(&g_alloc_mutex);
                 return new_block + 1;
             }
 		}
@@ -175,10 +186,15 @@ void *first_fit(size_t size) {
         block = block->next;
     }
 
-    pthread_mutex_unlock(&g_alloc_mutex);
     return NULL;
 }
 
+/**
+  * Finds the smallest and most accurate space possible for the allocation and allocates the
+  * the memory there, if all the memory regions are filled, calls malloc(size)
+  * Param: size, size of the memory to be allocated
+  * Return: void pointer to the start of the memory allocation
+  */
 void *best_fit(size_t size) {
     struct mem_block *block = g_head;
     struct mem_block *temp_block = g_head;
@@ -189,7 +205,6 @@ void *best_fit(size_t size) {
     int index = 0;
 
     if (block == NULL) {
-        pthread_mutex_unlock(&g_alloc_mutex);
         return NULL;
     }
 
@@ -214,7 +229,6 @@ void *best_fit(size_t size) {
             if (temp_block->usage == 0) {
                 temp_block->alloc_id = g_allocations++;
                 temp_block->usage = real_size;
-                pthread_mutex_unlock(&g_alloc_mutex);
                 return temp_block + 1;
             } else {
                 struct mem_block *new_block = (void*) temp_block + temp_block->usage;
@@ -228,7 +242,6 @@ void *best_fit(size_t size) {
 
                 temp_block->next = new_block;
                 temp_block->size = temp_block->usage;
-                pthread_mutex_unlock(&g_alloc_mutex);
                 return new_block + 1;
             }
         }
@@ -236,10 +249,15 @@ void *best_fit(size_t size) {
         temp_block = temp_block->next;
     }
 
-    pthread_mutex_unlock(&g_alloc_mutex);
     return NULL;
 }
 
+/**
+  * Finds the largest space possible for the allocation and allocates the memory there, if all of the
+  * memory regions are filled, calls malloc(size)
+  * Param: Size, size of the memory to be allocated
+  * Return: void pointer to the start of the memory allocation
+  */
 void *worst_fit(size_t size) {
     struct mem_block *block = g_head;
     struct mem_block *temp_block = g_head;
@@ -250,7 +268,6 @@ void *worst_fit(size_t size) {
     int index = 0;
 
     if (block == NULL) {
-        pthread_mutex_unlock(&g_alloc_mutex);
         return NULL;
     }
 
@@ -275,7 +292,6 @@ void *worst_fit(size_t size) {
             if (temp_block->usage == 0) {
                 temp_block->alloc_id = g_allocations++;
                 temp_block->usage = real_size;
-                pthread_mutex_unlock(&g_alloc_mutex);
                 return temp_block + 1;
             } else {
                 struct mem_block *new_block = (void*) temp_block + temp_block->usage;
@@ -289,7 +305,6 @@ void *worst_fit(size_t size) {
 
                 temp_block->next = new_block;
                 temp_block->size = temp_block->usage;
-                pthread_mutex_unlock(&g_alloc_mutex);
                 return new_block + 1;
             }
         }
@@ -297,50 +312,54 @@ void *worst_fit(size_t size) {
         temp_block = temp_block->next;
     }
 
-    pthread_mutex_unlock(&g_alloc_mutex);
     return NULL;
 }
 
-void *reuse(size_t size) {
-    // TODO: using free space management algorithms, find a block of memory that
-    // we can reuse. Return NULL if no suitable block is found.
+/**
+  * Checks to see if any of the allocation algorithms need to be performed,
+  * and performs them.
+  * Param: size, size of the memory to be allocated
+  * Return: void pointer to the start of the memory allocation
+  */
+void *reuse(size_t size) {  
     char *algo = getenv("ALLOCATOR_ALGORITHM");
     if (algo == NULL) {
         algo = "first_fit";
     }
 
     if (strcmp(algo, "first_fit") == 0) {
-        pthread_mutex_lock(&g_alloc_mutex);
         return first_fit(size);
     } else if (strcmp(algo, "best_fit") == 0) {
-        pthread_mutex_lock(&g_alloc_mutex);
         return best_fit(size);
     } else if (strcmp(algo, "worst_fit") == 0) {
-        pthread_mutex_lock(&g_alloc_mutex);
         return worst_fit(size);
     }
 
     return NULL;
 }
 
+/**
+  * Allocates memory for a given size
+  * Param: size, size of the memory to be allocated
+  * Return: void pointer to the start of the memory allocation
+  */
 void *malloc(size_t size) {
-    // TODO: allocate memory. You'll first check if you can reuse an existing
-    // block. If not, map a new memory region.
+    pthread_mutex_lock(&g_alloc_mutex);
+
     if (size % 8 != 0) {
         size = size + (8 - size % 8);
     }
 
-    bool cal = false;
-    // char *algo = getenv("ALLOCATOR_SCRIBBLE");
-    // if (strcmp(algo, "1") == 0) {
-    //     cal = true;
-    //     LOGP("YAH TRUE\n");
-    // }
+    scribble = false;
+    char *algo = getenv("ALLOCATOR_SCRIBBLE");
+    if (algo != NULL) {
+        if (strcmp(algo, "1") == 0) {
+            scribble = true;
+        }
+    }
 
     void* reg_ptr = reuse(size);
     if (reg_ptr == NULL) {
-        pthread_mutex_lock(&g_alloc_mutex);
-
         size_t real_size = size + sizeof(struct mem_block);
         int page_size = getpagesize();
         size_t num_pages = real_size / page_size;
@@ -353,6 +372,7 @@ void *malloc(size_t size) {
 
         if (block == MAP_FAILED) {
             perror("mmap error");
+            pthread_mutex_unlock(&g_alloc_mutex);
             return NULL;
         }
 
@@ -373,36 +393,37 @@ void *malloc(size_t size) {
         	curr->next = block;
         }
 
+        if (scribble) {
+            memset(block + 1, 0xAA, size);
+        }
+
         pthread_mutex_unlock(&g_alloc_mutex);
-        
-        // if (cal) {
-            // calloc(0 , size);
-        // } else {
-            return block + 1;
-        // }
+        return block + 1;
     } else {
-        // if (cal) {
-            // calloc(0 , size);
-        // } else {
-            return reg_ptr;
-        // }
+        if (scribble) {
+            memset(reg_ptr, 0xAA, size);
+        }
+        pthread_mutex_unlock(&g_alloc_mutex);
+        return reg_ptr;
     }
 }
 
+/**
+  * Frees the memory to the given pointer, frees the entire page if all regions are freed
+  * Param: ptr, pointer to the memory that needs to be freed 
+  */
 void free(void *ptr) {
+    pthread_mutex_lock(&g_alloc_mutex);
+
     if (ptr == NULL) {
+        pthread_mutex_unlock(&g_alloc_mutex);
         return;
     }
 
     struct mem_block *blk = (struct mem_block*) ptr - 1;
     struct mem_block *next_region = NULL;
-    int temp = blk->usage;
     blk->usage = 0;
     bool free_region = true;
-
-    if (blk == NULL) {
-        return;
-    }
 
     struct mem_block *curr = blk->region_start;
     while (curr != NULL) {
@@ -414,57 +435,87 @@ void free(void *ptr) {
 
             if (curr->usage != 0) {
                 free_region = false;
+                pthread_mutex_unlock(&g_alloc_mutex);
                 return;
             }
         }
-
         curr = curr->next;
     }
 
     if (free_region) {
+        void *temp_blk = blk->region_start;
         munmap(blk->region_start, blk->region_size);
-                
-        if (blk == g_head) {
+             
+        if (temp_blk == g_head) {
             g_head = next_region;
         } else {
             struct mem_block *prev = g_head;
             while (prev->next != blk) {
-                prev = prev->next;
+                if (prev->next == temp_blk) {
+                    break;
+                } else {
+                    prev = prev->next;
+                }
             }
+
             prev->next = next_region;
         }
     }
-    // TODO: free memory. If the containing region is empty (i.e., there are no
-    // more blocks in use), then it should be unmapped.
+
+    pthread_mutex_unlock(&g_alloc_mutex);
 }
 
+/**
+  * Function that allocates memory of given size and sets it equal to zero
+  * Param: nmemb, number of elements to be allocated
+  * Param: size, size of the allocation
+  * Return: void pointer to the start of the memory allocation
+  */
 void *calloc(size_t nmemb, size_t size) {
-    // TODO: hmm, what does calloc do?
-    // LOGP("IN HERE IN CALLOC\n");  
-    return NULL; 
+    LOGP("IN CALLOC\n");
+    size_t real_size = nmemb * size;
+    void *ptr = malloc(real_size);
+    if (ptr == NULL) {
+        return NULL;
+    }
+
+    pthread_mutex_lock(&g_alloc_mutex);
+    memset(ptr, 0x00, real_size);
+    pthread_mutex_unlock(&g_alloc_mutex);
+    return ptr; 
 }
 
-void *realloc(void *ptr, size_t size)
-{
+/**
+  * Function that reallocates the memory that already exists to the size given
+  * Param: ptr, pointer to the memory needed to reallocate
+  * Param: size, the new size that the memory must be set to
+  * Return: void pointer to the start of the memory block reallocated
+  */
+void *realloc(void *ptr, size_t size) {
+    size_t real_size = size + sizeof(struct mem_block);
+
     if (ptr == NULL) {
-        /* If the pointer is NULL, then we simply malloc a new block */
         return malloc(size);
     }
 
     if (size == 0) {
-        /* Realloc to 0 is often the same as freeing the memory block... But the
-         * C standard doesn't require this. We will free the block and return
-         * NULL here. */
         free(ptr);
         return NULL;
     }
 
-    // TODO: reallocation logic
     struct mem_block *block = (struct mem_block*) ptr - 1;
-    if ((block->size - block->usage) >= size) {
-        block->usage = size;
-        return (block + 1);
-    } else {
-        return malloc(size);
+    if (real_size <= block->size) {
+        block->usage = real_size;
+        return ptr;
+    } else if (real_size > block->size) {
+        void *malloc_ptr = malloc(size);
+        pthread_mutex_lock(&g_alloc_mutex);
+        memcpy(malloc_ptr, ptr, block->usage - sizeof(struct mem_block));
+        pthread_mutex_unlock(&g_alloc_mutex);
+        
+        free(ptr);
+        return malloc_ptr;
     }
+
+    return NULL;
 }
