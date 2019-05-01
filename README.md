@@ -34,4 +34,20 @@ Everything is done in the allocator.c file:
                
 - reuse(size): this function checks to see if any specific allocating algorithms should be followed when  
                allocating memory and those specific algorithms are called. If not, then the default is first fit.  
-               
+                 
+- first_fit(size): this function is an algorithm to find the first possible region that can allocate the memory  
+                   size and allocates the memory there.  
+                     
+- best_fit(size): this function is an algorithm to find the best/most accurate possible region that can allocate  
+                  the memory size and allocates the memory there.  
+                    
+- worst_fit(size): this function is an algorithm to the worst/biggest possible region that can allocate the memory  
+                   size and allocates the memory there.  
+                     
+- print_memory(): Prints out the current memory state, including both the regions and blocks. Entries are printed  
+                  in order, so there is an implied link from the topmost entry to the next, and so on. fprintf is  
+                  used and stdout is set to file pointer.  
+                    
+- write_memory(): Writes out the current memory state, including both the regions and blocks. Entries are printed  
+                  in order, so there is an implied link from the topmost entry to the next, and so on. Writes to  
+                  file given. fprintf is used and file pointer is set to the given file.
